@@ -10,7 +10,6 @@ require("advanced-logs");
 // persistent storage (vanity and target channel)
 const DATA_PATH = __dirname + "/data.json";
 let persistentData = (function loadData() {
-const vanityPresenceState = new Map();
   try {
     const raw = fs.readFileSync(DATA_PATH, "utf8");
     const parsed = JSON.parse(raw);
@@ -18,6 +17,8 @@ const vanityPresenceState = new Map();
   } catch (e) {}
   return {};
 })();
+
+const vanityPresenceState = new Map();
 
 function saveData() {
   try {
