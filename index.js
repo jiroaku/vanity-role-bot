@@ -10,6 +10,7 @@ require("advanced-logs");
 // persistent storage (vanity and target channel)
 const DATA_PATH = __dirname + "/data.json";
 let persistentData = (function loadData() {
+const vanityPresenceState = new Map();
   try {
     const raw = fs.readFileSync(DATA_PATH, "utf8");
     const parsed = JSON.parse(raw);
@@ -163,6 +164,11 @@ client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
   const customStatus = presence?.activities?.find((a) => a?.type === 4 && typeof a?.state === "string");
   const statusText = customStatus?.state?.toLowerCase?.() || "";
   const hasTrigger = triggers.some((t) => statusText.includes(t));
+  const previousCustomStatus = oldPresence?.activities?.find((a) => a?.type === 4 && typeof a?.state === "string");
+  const previousStatusText = previousCustomStatus?.state?.toLowerCase?.() || "";
+  const previousHadTrigger = triggers.some((t) => previousStatusText.includes(t));
+  const userId = newPresence.member.id;
+  const previousState = vanityPresenceState.has(userId) ? vanityPresenceState.get(userId) : newPresence.member.roles.cache.has(vanity_role_system_role_id);
 
   // Do not remove role just because presence/activities are missing (e.g., offline/invisible or brief API gaps)
   if ((!presence || presence.activities.length === 0) && newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
@@ -174,13 +180,33 @@ client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
     return;
   }
 
-  if (!presence?.activities?.[0]) return;
-  if (presence.activities[0].state === "") return;
-  if (presence.activities[0].state === null && newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
-    if (!newPresence.member.roles.cache.has(vanity_role_system_role_id)) return;
-    await newPresence.member.roles.remove(vanity_role_system_role);
+  if (!presence?.activities?.[0]) {
+    vanityPresenceState.set(userId, hasTrigger);
+    if (!customStatus && previousState && previousHadTrigger && newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
+      const oldStatus = oldPresence?.status;
+      if (oldStatus && oldStatus !== "offline" && oldStatus !== "invisible") {
+        await newPresence.member.roles.remove(vanity_role_system_role);
+        vanityPresenceState.set(userId, false);
+      }
+    }
     return;
-  }
+  }
+
+  if (!customStatus) {
+    vanityPresenceState.set(userId, hasTrigger);
+    if (previousState && previousHadTrigger && newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
+      const oldStatus = oldPresence?.status;
+      if (oldStatus && oldStatus !== "offline" && oldStatus !== "invisible") {
+        await newPresence.member.roles.remove(vanity_role_system_role);
+        vanityPresenceState.set(userId, false);
+      }
+    }
+    return;
+  }
+
+  if (customStatus.state === "") return;
+
+  vanityPresenceState.set(userId, hasTrigger);
 
   if (hasTrigger && !newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
     if (newPresence.member.roles.cache.has(vanity_role_system_role_id)) return;
@@ -197,10 +223,12 @@ client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
       .setFooter({ text: `Perderás tus beneficios si retiras la vanity` })
       .setTimestamp();
 
-    return vanity_role_system_channel.send({ embeds: [embed] });
-  } else if (!hasTrigger && newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
+    vanityPresenceState.set(userId, true);
+    return vanity_role_system_channel.send({ content: `<@${newPresence.member.id}>`, embeds: [embed] });
+  } else if (!hasTrigger && newPresence.member.roles.cache.has(vanity_role_system_role_id) && previousState) {
     // Only remove when we can confirm the status no longer matches while online
     await newPresence.member.roles.remove(vanity_role_system_role);
+    vanityPresenceState.set(userId, false);
     return;
   }
 }
