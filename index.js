@@ -162,76 +162,54 @@ client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
   // Helper: check if current custom status contains any trigger variants
   const triggers = computeTriggers(); // case-insensitive contains
   const presence = newPresence.member?.presence;
-  const customStatus = presence?.activities?.find((a) => a?.type === 4 && typeof a?.state === "string");
+  const userId = newPresence.member.id;
+  const hadVanity = vanityPresenceState.has(userId) ? vanityPresenceState.get(userId) : newPresence.member.roles.cache.has(vanity_role_system_role_id);
+
+  if (!presence || presence.status === "offline" || presence.status === "invisible") {
+    vanityPresenceState.set(userId, hadVanity);
+    return;
+  }
+
+  const customStatus = presence.activities?.find((a) => a?.type === 4 && typeof a?.state === "string");
   const statusText = customStatus?.state?.toLowerCase?.() || "";
   const hasTrigger = triggers.some((t) => statusText.includes(t));
-  const previousCustomStatus = oldPresence?.activities?.find((a) => a?.type === 4 && typeof a?.state === "string");
-  const previousStatusText = previousCustomStatus?.state?.toLowerCase?.() || "";
-  const previousHadTrigger = triggers.some((t) => previousStatusText.includes(t));
-  const userId = newPresence.member.id;
-  const previousState = vanityPresenceState.has(userId) ? vanityPresenceState.get(userId) : newPresence.member.roles.cache.has(vanity_role_system_role_id);
 
-  // Do not remove role just because presence/activities are missing (e.g., offline/invisible or brief API gaps)
-  if ((!presence || presence.activities.length === 0) && newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
-    return;
-  }
-
-  // Do not remove role purely due to offline/invisible
-  if (presence?.status === "offline" || presence?.status === "invisible") {
-    return;
-  }
-
-  if (!presence?.activities?.[0]) {
-    vanityPresenceState.set(userId, hasTrigger);
-    if (!customStatus && previousState && previousHadTrigger && newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
-      const oldStatus = oldPresence?.status;
-      if (oldStatus && oldStatus !== "offline" && oldStatus !== "invisible") {
-        await newPresence.member.roles.remove(vanity_role_system_role);
-        vanityPresenceState.set(userId, false);
-      }
+  if (!customStatus || customStatus.state === "") {
+    if (hadVanity && newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
+      await newPresence.member.roles.remove(vanity_role_system_role);
     }
-    return;
-  }
-
-  if (!customStatus) {
-    vanityPresenceState.set(userId, hasTrigger);
-    if (previousState && previousHadTrigger && newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
-      const oldStatus = oldPresence?.status;
-      if (oldStatus && oldStatus !== "offline" && oldStatus !== "invisible") {
-        await newPresence.member.roles.remove(vanity_role_system_role);
-        vanityPresenceState.set(userId, false);
-      }
-    }
-    return;
-  }
-
-  if (customStatus.state === "") return;
-
-  vanityPresenceState.set(userId, hasTrigger);
-
-  if (hasTrigger && !newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
-    if (newPresence.member.roles.cache.has(vanity_role_system_role_id)) return;
-    await newPresence.member.roles.add(vanity_role_system_role);
-
-    const graciasEmoji = vanity_role_system_guild?.emojis?.cache?.find((e) => e?.name?.toLowerCase?.() === "gracias");
-    const graciasTag = graciasEmoji ? `<${graciasEmoji.animated ? 'a' : ''}:${graciasEmoji.name}:${graciasEmoji.id}>` : `:gracias:`;
-
-    const embed = new EmbedBuilder()
-      .setColor(0x2b2d31)
-      .setTitle(`Gracias por usar nuestra vanity! ${graciasTag}`)
-      .setDescription(`Haz desbloqueado el rol <@&${vanity_role_system_role_id}> en tu perfil.`)
-      .setThumbnail(newPresence.member.user.displayAvatarURL({ size: 512 }))
-      .setFooter({ text: `Perderás tus beneficios si retiras la vanity` })
-      .setTimestamp();
-
-    vanityPresenceState.set(userId, true);
-    return vanity_role_system_channel.send({ content: `<@${newPresence.member.id}>`, embeds: [embed] });
-  } else if (!hasTrigger && newPresence.member.roles.cache.has(vanity_role_system_role_id) && previousState) {
-    // Only remove when we can confirm the status no longer matches while online
-    await newPresence.member.roles.remove(vanity_role_system_role);
     vanityPresenceState.set(userId, false);
     return;
-  }
+  }
+
+  if (hasTrigger) {
+    if (!newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
+      await newPresence.member.roles.add(vanity_role_system_role);
+    }
+
+    if (!hadVanity) {
+      const graciasEmoji = vanity_role_system_guild?.emojis?.cache?.find((e) => e?.name?.toLowerCase?.() === "gracias");
+      const graciasTag = graciasEmoji ? `<${graciasEmoji.animated ? 'a' : ''}:${graciasEmoji.name}:${graciasEmoji.id}>` : `:gracias:`;
+
+      const embed = new EmbedBuilder()
+        .setColor(0x2b2d31)
+        .setTitle(`Gracias por usar nuestra vanity! ${graciasTag}`)
+        .setDescription(`Haz desbloqueado el rol <@&${vanity_role_system_role_id}> en tu perfil.`)
+        .setThumbnail(newPresence.member.user.displayAvatarURL({ size: 512 }))
+        .setFooter({ text: `Perderás tus beneficios si retiras la vanity` })
+        .setTimestamp();
+
+      await vanity_role_system_channel.send({ content: `<@${newPresence.member.id}>`, embeds: [embed] });
+    }
+
+    vanityPresenceState.set(userId, true);
+    return;
+  }
+
+  if (hadVanity && newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
+    await newPresence.member.roles.remove(vanity_role_system_role);
+  }
+  vanityPresenceState.set(userId, false);
 }
 }
 );
