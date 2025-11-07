@@ -1,0 +1,18 @@
+{
+  "name": "vanity-role-bot",
+  "version": "1.0.0",
+  "description": "Presence-aware Discord bot that grants a vanity role when members advertise your invite.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "jiroaku",
+  "license": "MIT",
+  "dependencies": {
+    "advanced-logs": "^2.1.3",
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.5"
+  },
+  "keywords": [],
+  "type": "commonjs"
+}
