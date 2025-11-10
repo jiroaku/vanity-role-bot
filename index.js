@@ -29,7 +29,13 @@ let persistentData = (function loadData() {
   return {};
 })();
 
+// Load persisted vanity states from data.json
 const vanityPresenceState = new Map();
+if (persistentData.vanityStates && typeof persistentData.vanityStates === 'object') {
+  for (const [userId, hadVanity] of Object.entries(persistentData.vanityStates)) {
+    vanityPresenceState.set(userId, hadVanity === true);
+  }
+}
 
 function saveData() {
   try {
@@ -41,6 +47,14 @@ function saveData() {
   } catch (e) {
     console.error("", `[DATA] Failed to write data.json: ${e?.message || e}`);
   }
+}
+
+function saveVanityState(userId, hadVanity) {
+  if (!persistentData.vanityStates) {
+    persistentData.vanityStates = {};
+  }
+  persistentData.vanityStates[userId] = hadVanity;
+  saveData();
 }
 
 function getCurrentVanity() {
@@ -227,16 +241,21 @@ client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
     const triggers = computeTriggers(); // case-insensitive contains
     const presence = newPresence.member?.presence;
     const userId = newPresence.member.id;
+
+    // Get previous state from persistent storage (trust this completely)
+    // This persists across bot restarts and reconnects
+    const hasRole = newPresence.member.roles.cache.has(vanity_role_system_role_id);
+    // Trust persistent storage first, then fallback to role check only if not in storage
     const hadVanity = vanityPresenceState.has(userId)
       ? vanityPresenceState.get(userId)
-      : newPresence.member.roles.cache.has(vanity_role_system_role_id);
+      : hasRole; // If user has the role, they already had the vanity
 
     if (
       !presence ||
       presence.status === "offline" ||
       presence.status === "invisible"
     ) {
-      vanityPresenceState.set(userId, hadVanity);
+      // Don't update state when offline, keep the last known state
       return;
     }
 
@@ -247,58 +266,68 @@ client.on(Events.PresenceUpdate, async (oldPresence, newPresence) => {
     const hasTrigger = triggers.some((t) => statusText.includes(t));
 
     if (!customStatus || customStatus.state === "") {
-      if (
-        hadVanity &&
-        newPresence.member.roles.cache.has(vanity_role_system_role_id)
-      ) {
+      if (hadVanity && hasRole) {
         await newPresence.member.roles.remove(vanity_role_system_role);
       }
       vanityPresenceState.set(userId, false);
+      saveVanityState(userId, false);
       return;
     }
 
     if (hasTrigger) {
-      if (!newPresence.member.roles.cache.has(vanity_role_system_role_id)) {
+      // If user already had the vanity (from persistent storage), restore role silently
+      // This handles cases where another bot removed the role
+      if (hadVanity) {
+        // User already had vanity before - restore role silently, no ping
+        if (!hasRole) {
+          await newPresence.member.roles.add(vanity_role_system_role);
+        }
+        // Update state to ensure it's saved
+        vanityPresenceState.set(userId, true);
+        saveVanityState(userId, true);
+        return; // Exit early - no ping needed
+      }
+
+      // User didn't have vanity before - this is a new addition
+      if (!hasRole) {
         await newPresence.member.roles.add(vanity_role_system_role);
       }
 
-      if (!hadVanity) {
-        const graciasEmoji = vanity_role_system_guild?.emojis?.cache?.find(
-          (e) => e?.name?.toLowerCase?.() === "gracias"
-        );
-        const graciasTag = graciasEmoji
-          ? `<${graciasEmoji.animated ? "a" : ""}:${graciasEmoji.name}:${
-              graciasEmoji.id
-            }>`
-          : `:gracias:`;
+      // Only ping if this is truly a new addition (hadVanity was false)
+      // Since we already returned above if hadVanity was true, we can ping here
+      const graciasEmoji = vanity_role_system_guild?.emojis?.cache?.find(
+        (e) => e?.name?.toLowerCase?.() === "gracias"
+      );
+      const graciasTag = graciasEmoji
+        ? `<${graciasEmoji.animated ? "a" : ""}:${graciasEmoji.name}:${
+            graciasEmoji.id
+          }>`
+        : `:gracias:`;
 
-        const embed = new EmbedBuilder()
-          .setColor(0x2b2d31)
-          .setTitle(`Gracias por usar nuestra vanity! ${graciasTag}`)
-          .setDescription(
-            `Haz desbloqueado el rol <@&${vanity_role_system_role_id}> en tu perfil.`
-          )
-          .setThumbnail(newPresence.member.user.displayAvatarURL({ size: 512 }))
-          .setFooter({ text: `Perderás tus beneficios si retiras la vanity` })
-          .setTimestamp();
+      const embed = new EmbedBuilder()
+        .setColor(0x2b2d31)
+        .setTitle(`Gracias por usar nuestra vanity! ${graciasTag}`)
+        .setDescription(
+          `<@${newPresence.member.id}> haz desbloqueado el rol <@&${vanity_role_system_role_id}> en tu perfil.`
+        )
+        .setThumbnail(newPresence.member.user.displayAvatarURL({ size: 512 }))
+        .setFooter({ text: `Perderás tus beneficios si retiras la vanity` })
+        .setTimestamp();
 
-        await vanity_role_system_channel.send({
-          content: `<@${newPresence.member.id}>`,
-          embeds: [embed],
-        });
-      }
+      await vanity_role_system_channel.send({
+        embeds: [embed],
+      });
 
       vanityPresenceState.set(userId, true);
+      saveVanityState(userId, true);
       return;
     }
 
-    if (
-      hadVanity &&
-      newPresence.member.roles.cache.has(vanity_role_system_role_id)
-    ) {
+    if (hadVanity && hasRole) {
       await newPresence.member.roles.remove(vanity_role_system_role);
     }
     vanityPresenceState.set(userId, false);
+    saveVanityState(userId, false);
   }
 });
 
